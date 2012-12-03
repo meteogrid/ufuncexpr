@@ -1,5 +1,6 @@
 import ast
 import sys
+import math
 from itertools import count
 
 import ctypes, ctypes.util
@@ -11,7 +12,7 @@ __all__ = ['evaluate', 'UFuncExpression']
 
 
 
-def evaluate(expression, **namespace):
+def evaluate(expression, _namespace=None, **namespace):
     """
     >>> a = 4
     >>> evaluate("a+2")
@@ -21,6 +22,7 @@ def evaluate(expression, **namespace):
     >>> f(1,6)
     9.0
     """
+    namespace = _namespace if _namespace else namespace
     if not namespace:
         f = sys._getframe(1)
         namespace = dict(f.f_globals, **f.f_locals)
@@ -206,9 +208,10 @@ def install_libmath(namespace=None):
     if namespace is not None:
         g = namespace
     else:
-        f = sys.getframe(1)
+        f = sys._getframe(1)
         g = dict(f.f_globals, **f.f_locals)
     g.update((k,v) for (k,v) in vars(libmath).items() if not k.startswith('_'))
+    g.update(pi=math.pi)
 
 
 def _N(name, *args, **kw):
