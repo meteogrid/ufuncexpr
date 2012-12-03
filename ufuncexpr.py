@@ -98,11 +98,10 @@ class UFuncExpression(object):
     def __init__(self, expression, namespace=None, **kw):
         namespace = namespace if namespace is not None else kw
         self._initargs = (expression, namespace)
-        math_funcs = dict((k,v) for (k,v) in vars(libmath).items()
-                           if not k.startswith('_'))
-        self.globals_ = dict(math_funcs,
+        self.globals_ = dict(
             __vectorize__ = vectorize.vectorize,
         )
+        install_libmath(self.globals_)
         self.globals_.update(namespace)
         self._args, self.func = self._create_ufunc_from_expression(expression)
 
@@ -185,6 +184,9 @@ for name, nargs in [
     f.argtypes = [ctypes.c_double]*nargs
     f.restype = ctypes.c_double
 
+def install_libmath(globals_=None):
+    g = globals_ if globals_ is not None else sys.getframe(1).f_globals
+    g.update((k,v) for (k,v) in vars(libmath).items() if not k.starswith('_'))
 
 
 def _N(name, *args, **kw):
