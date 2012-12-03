@@ -172,6 +172,8 @@ class UFuncExpression(object):
 libmath = ctypes.CDLL(ctypes.util.find_library('m'))
 for name, nargs in [
     ('atan2', 2),
+    ('fmax', 2),
+    ('fmin', 2),
     ('pow', 2),
     ('sqrt', 1),
     ('sin', 1),
@@ -209,7 +211,7 @@ def install_libmath(namespace=None):
         g = namespace
     else:
         f = sys._getframe(1)
-        g = dict(f.f_globals, **f.f_locals)
+        g = f.f_locals
     g.update((k,v) for (k,v) in vars(libmath).items() if not k.startswith('_'))
     g.update(pi=math.pi)
 
