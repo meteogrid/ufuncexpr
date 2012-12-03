@@ -28,7 +28,7 @@ def evaluate(expression, **namespace):
     return f(**namespace)
 
 
-def _proxy_to_func(name):
+def _delegate_to_ufunc(name):
     return property(lambda s: getattr(s.func, name))
 
 class UFuncExpression(object):
@@ -69,6 +69,18 @@ class UFuncExpression(object):
     >>> f5 = UFuncExpression("where(a>1,a,b)")
     >>> f5(a=0.5, b=1), f5(a=2, b=4)
     (1.0, 2.0)
+
+    Can use 'cond(*cases, default)' macro. 
+
+    >>> f6 = UFuncExpression("cond((a>1,a),b)")
+    >>> f6(a=0.5, b=1), f6(a=2, b=4)
+    (1.0, 2.0)
+
+    Can use 'switch(var, *cases, default)' macro. 
+
+    >>> f7 = UFuncExpression("switch(a, ((1,2,3),0), ((4,5,6),1), -1)")
+    >>> f7(a=1), f7(a=3), f7(a=4), f7(7)
+    (0, 0, 1, -1)
 
     Can pickle and unpickle UFuncExpression
     
@@ -148,9 +160,9 @@ class UFuncExpression(object):
     __reduce_ex__ = __reduce__
 
 
-    reduce = _proxy_to_func('reduce')
-    reduceAt = _proxy_to_func('reduceAt')
-    accumulate = _proxy_to_func('accumulate')
+    reduce = _delegate_to_ufunc('reduce')
+    reduceAt = _delegate_to_ufunc('reduceAt')
+    accumulate = _delegate_to_ufunc('accumulate')
 
 
         
@@ -184,14 +196,19 @@ for name, nargs in [
     ('floor', 1),
     ('trunc', 1),
     ('fabs', 1),
+    ('nan', 0),
 ]:
     f = getattr(libmath, name)
     f.argtypes = [ctypes.c_double]*nargs
     f.restype = ctypes.c_double
 
-def install_libmath(globals_=None):
-    g = globals_ if globals_ is not None else sys.getframe(1).f_globals
-    g.update((k,v) for (k,v) in vars(libmath).items() if not k.starswith('_'))
+def install_libmath(namespace=None):
+    if namespace is not None:
+        g = namespace
+    else:
+        f = sys.getframe(1)
+        g = dict(f.f_globals, **f.f_locals)
+    g.update((k,v) for (k,v) in vars(libmath).items() if not k.startswith('_'))
 
 
 def _N(name, *args, **kw):
@@ -210,6 +227,8 @@ class TransformExpressionToFunction(ast.NodeTransformer):
         self.assignments = set()
         self._macros = dict(
             where = self._where_macro,
+            cond = self._cond_macro,
+            switch = self._switch_macro,
             )
 
     @property
@@ -260,6 +279,44 @@ class TransformExpressionToFunction(ast.NodeTransformer):
             raise _syntax_error(args, "'where' expects 3 arguments")
         return _N('IfExp', test, then, else_)
 
+    @staticmethod
+    def _cond_macro(args):
+        """Implements the 'cond' macro."""
+        if not args:
+            raise _syntax_error(None, "Missing conditionals")
+        for a in args[:-1]:
+            if not isinstance(a, ast.Tuple):
+                raise _syntax_error(a, "More than one default")
+        if isinstance(args[-1], ast.Tuple):
+            raise _syntax_error(a,
+                "Last argument to 'cond' must be the default case")
+        args = list(args)
+        default = args.pop(-1)
+        while args:
+            cond = args.pop(-1)
+            test, then = cond.elts
+            default = _N('IfExp', test, then, default)
+        return default
+
+    @staticmethod
+    def _switch_macro(args):
+        """Implements the 'switch' macro."""
+        if not args:
+            raise _syntax_error(None, "Missing conditionals")
+
+        args = list(args)
+        default = args.pop(-1)
+        left = args.pop(0)
+        while args:
+            matches, then = args.pop(-1).elts
+            test = _N('BoolOp',
+                op=_N('Or'),
+                values=[_N('Compare',
+                    left=left,
+                    ops=[_N('Eq')],
+                    comparators=[c]) for c in matches.elts])
+            default = _N('IfExp', test, then, default)
+        return default
 
 
 def _syntax_error(node, msg, filename='<string>'):
