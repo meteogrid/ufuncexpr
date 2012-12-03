@@ -16,9 +16,14 @@ def evaluate(expression, **namespace):
     >>> a = 4
     >>> evaluate("a+2")
     6.0
+    >>> def f(a,b):
+    ...     return evaluate("a+b+2")
+    >>> f(1,6)
+    9.0
     """
     if not namespace:
-        namespace = sys._getframe(1).f_globals
+        f = sys._getframe(1)
+        namespace = dict(f.f_globals, **f.f_locals)
     f = UFuncExpression(expression)
     return f(**namespace)
 
