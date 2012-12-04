@@ -1,7 +1,12 @@
+import numpy
+from setuptools import setup, Extension
+
 try:
-    from setuptools import setup
+    from Cython.Distutils import build_ext
+    extra = dict(cmdclass=dict(build_ext=build_ext))
 except ImportError:
-    from distutils.core import setup
+    # Assume .c file is generated
+    extra = {}
 
 setup(
     name='ufuncexpr',
@@ -11,9 +16,15 @@ setup(
     author_email='alberto@meteogrid.com',
     description="Creates ufuncs from expressions using numba",
     license="BSD",
-    py_modules=['ufuncexpr'],
+    packages=['ufuncexpr'],
     install_requires=['numba'],
     test_suite="ufuncexpr",
+    ext_modules = [
+        Extension('ufuncexpr._ufuncwrapper',
+                  ['ufuncexpr/_ufuncwrapper.pyx'],
+                  include_dirs=[numpy.get_include()])
+        ],
+    **extra
     )
     
 

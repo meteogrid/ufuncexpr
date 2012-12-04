@@ -1,3 +1,5 @@
 *.egg-info
 *.py[c,o]
 *.sw[p,o]
+ufuncexpr/_ufuncwrapper.c
+ufuncexpr/_ufuncwrapper.so

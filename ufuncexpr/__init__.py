@@ -5,7 +5,7 @@ from itertools import count
 
 import ctypes, ctypes.util
 
-from numba import vectorize
+from . import vectorize
 
 
 __all__ = ['evaluate', 'UFuncExpression']
@@ -21,6 +21,12 @@ def evaluate(expression, _namespace=None, **namespace):
     ...     return evaluate("a+b+2")
     >>> f(1,6)
     9.0
+
+    >>> import numpy as np
+    >>> b = np.array([range(2),range(2)])
+    >>> evaluate("b+2")
+    array([[ 2.,  3.],
+           [ 2.,  3.]])
     """
     namespace = _namespace if _namespace else namespace
     if not namespace:
@@ -118,7 +124,7 @@ class UFuncExpression(object):
         namespace = namespace if namespace is not None else kw
         self._initargs = (expression, namespace)
         self.globals_ = dict(
-            __vectorize__ = vectorize.vectorize,
+            __vectorize__ = vectorize.vectorize
         )
         install_libmath(self.globals_)
         self.globals_.update(namespace)
