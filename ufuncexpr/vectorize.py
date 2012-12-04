@@ -1,12 +1,17 @@
-from numba import decorators
+from numba import jit
 
 from ._ufuncwrapper import UFuncWrapper
+from .multiiter import MultiIterFunc
 
-def vectorize(signatures):
+def vectorize(signatures=None, backend='multiiter'):
     def wrap(f):
-        jitted = [decorators.jit(s)(f).lfunc for s in signatures]
-        uf = UFuncWrapper(f.func_name, f.__doc__ or '', len(jitted[0].args))
+        jitted = [jit(s)(f).lfunc for s in (signatures or [])]
+        if backend=='multiiter':
+            uf = MultiIterFunc.decorate(f)
+        else:
+            assert jitted
+            uf = UFuncWrapper(f.func_name, f.__doc__ or '', len(jitted[0].args))
         for f in jitted:
-            uf.add_specialization(f, decorators.context.llvm_ee)
+            uf.add_specialization(f)
         return uf
     return wrap

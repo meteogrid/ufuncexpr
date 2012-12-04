@@ -35,9 +35,10 @@ cdef class UFuncWrapper:
         self.functions = NULL
         self.func = None
 
-    def add_specialization(self, llvm_function, execution_engine):
+    def add_specialization(self, llvm_function):
         assert len(llvm_function.args)==self.arity, "Bad arity"
         return_type = llvm_function.type.pointee.return_type
+        execution_engine = llvm_function.module.owner
         lfunc = make_loop_func_from_llvm_func(llvm_function)
         # keep a ref to prevent it from being gced
         self.llvm_functions += (lfunc,)
@@ -94,13 +95,13 @@ cdef class UFuncWrapper:
 
 
 _llvm_ty_str_to_numpy = {
-            'i8'     : np.int8,
-            'i16'    : np.int16,
-            'i32'    : np.int32,
-            'i64'    : np.int64,
-            'float'  : np.float32,
-            'double' : np.float64,
-        }
+    'i8'     : np.int8,
+    'i16'    : np.int16,
+    'i32'    : np.int32,
+    'i64'    : np.int64,
+    'float'  : np.float32,
+    'double' : np.float64,
+}
 
 def _llvm_ty_to_numpy(ty):
     return _llvm_ty_str_to_numpy[str(ty)]

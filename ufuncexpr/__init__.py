@@ -16,17 +16,17 @@ def evaluate(expression, _namespace=None, **namespace):
     """
     >>> a = 4
     >>> evaluate("a+2")
-    6.0
+    6
     >>> def f(a,b):
     ...     return evaluate("a+b+2")
     >>> f(1,6)
-    9.0
+    9
 
     >>> import numpy as np
     >>> b = np.array([range(2),range(2)])
     >>> evaluate("b+2")
-    array([[ 2.,  3.],
-           [ 2.,  3.]])
+    array([[2, 3],
+           [2, 3]])
     """
     namespace = _namespace if _namespace else namespace
     if not namespace:
@@ -45,13 +45,13 @@ class UFuncExpression(object):
 
     >>> f1 = UFuncExpression('a+b')
     >>> f1(1,3)
-    4.0
+    4
 
     Variables can be bound at compile time
 
     >>> f2 = UFuncExpression('a+b', b=3)
     >>> f2(2)
-    5.0
+    5
 
     Functions are cached
 
@@ -65,7 +65,7 @@ class UFuncExpression(object):
     The return value is always the value of the last expression.
 
     >>> UFuncExpression("c=a+b;c+1")(a=1, b=4)
-    6.0
+    6
 
     Can call functions form libm
 
@@ -76,13 +76,13 @@ class UFuncExpression(object):
 
     >>> f5 = UFuncExpression("where(a>1,a,b)")
     >>> f5(a=0.5, b=1), f5(a=2, b=4)
-    (1.0, 2.0)
+    (1.0, 2)
 
     Can use 'cond(*cases, default)' macro. 
 
     >>> f6 = UFuncExpression("cond((a>1,a),b)")
     >>> f6(a=0.5, b=1), f6(a=2, b=4)
-    (1.0, 2.0)
+    (1.0, 2)
 
     Can use 'switch(var, *cases, default)' macro. 
 
@@ -98,7 +98,7 @@ class UFuncExpression(object):
 
     Can call reduce, accumulate, etc..
 
-    >>> f6 = UFuncExpression("(a+1)*b")
+    >>> f6 = UFuncExpression("(a+1)*b", _backend='ufunc')
     >>> f6.reduce(range(6))
     325.0
     >>> f6.accumulate(range(6))
@@ -121,10 +121,14 @@ class UFuncExpression(object):
         return object.__new__(cls)
 
     def __init__(self, expression, namespace=None, **kw):
-        namespace = namespace if namespace is not None else kw
+        namespace = namespace if namespace is not None else dict(kw)
         self._initargs = (expression, namespace)
+        backend = kw.pop('_backend', 'multiiter')
+        def _vectorize(*args, **kw):
+            kw = dict(kw, backend=backend)
+            return vectorize.vectorize(*args, **kw) 
         self.globals_ = dict(
-            __vectorize__ = vectorize.vectorize
+            __vectorize__ = _vectorize
         )
         install_libmath(self.globals_)
         self.globals_.update(namespace)
