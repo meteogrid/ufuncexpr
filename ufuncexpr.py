@@ -186,7 +186,7 @@ for name, nargs in [
 
 def install_libmath(globals_=None):
     g = globals_ if globals_ is not None else sys.getframe(1).f_globals
-    g.update((k,v) for (k,v) in vars(libmath).items() if not k.starswith('_'))
+    g.update((k,v) for (k,v) in vars(libmath).items() if not k.startswith('_'))
 
 
 def _N(name, *args, **kw):
