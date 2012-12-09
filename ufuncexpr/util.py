@@ -1,14 +1,16 @@
+from ctypes import sizeof, c_void_p
 from llvm import core as lc, passes as lp
 import numpy as np
-
 import numba
-
 
 def llvm_ty_to_dtype(ty):
     return np.dtype(_llvm_ty_to_numpy(ty))
 
 def dtype_to_numba(dtype):
     return _dtype_to_numba_map[dtype]
+
+def determine_pointer_size():
+    return sizeof(c_void_p) * 8
         
 
 def optimize_loop_func(lfunc, func, opt_level=3):
