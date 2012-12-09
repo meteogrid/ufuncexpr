@@ -1,11 +1,5 @@
-import sys
-import os
-from subprocess import check_call, Popen, PIPE
 import numpy
 from setuptools import setup, Extension
-
-RUNTIME_C = os.path.join(os.path.dirname(__file__), 'ufuncexpr', 'runtime.c')
-RUNTIME_LL = RUNTIME_C[:-2] + '.ll'
 
 try:
     from Cython.Distutils import build_ext
@@ -13,17 +7,6 @@ try:
 except ImportError:
     # Assume .c file is generated
     extra = {}
-
-
-def compile_runtime():
-    py_includes = Popen(['python-config','--includes'], stdout=PIPE)\
-                  .communicate()[0].split()
-    numpy_includes = [numpy.get_include()]
-    check_call(['clang'] + py_includes + numpy_includes + [
-        '-S', '-emit-llvm', '-o', RUNTIME_LL, RUNTIME_C])
-
-if 'develop' in sys.argv or not os.path.exists(RUNTIME_LL):
-    compile_runtime()
 
 setup(
     name='ufuncexpr',
