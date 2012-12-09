@@ -1,5 +1,7 @@
+import inspect
 import sys
 import numpy as np
+import numba
 
 from llvm import core as lc, passes as lp
 from llvm.core import Constant, Type, Function, Builder
@@ -7,13 +9,16 @@ from llvm.core import Constant, Type, Function, Builder
 from numpy cimport PyUFuncGenericFunction, PyUFunc_FromFuncAndData, import_ufunc
 from libc.stdlib cimport malloc, free, realloc
 
+
 import_ufunc()
 
+__all__ = ['UFuncWrapper']
 
 cdef class UFuncWrapper:
 
     cdef readonly tuple args
     cdef readonly object func
+    cdef readonly object py_func
     cdef readonly tuple llvm_functions
     cdef PyUFuncGenericFunction *functions
     cdef char *types
@@ -22,11 +27,14 @@ cdef class UFuncWrapper:
     cdef bytes doc
     cdef int arity
 
+    cdef object _seen_types
+    cdef object _jit
+
     property __doc__:
         def __get__(self):
             return self.doc
 
-    def __init__(self, name, doc, arity):
+    def __init__(self, name, doc, arity, _jit=numba.jit, _py_func=None):
         self.__name__ = name
         self.doc = doc
         self.arity = arity
@@ -34,6 +42,14 @@ cdef class UFuncWrapper:
         self.types = NULL
         self.functions = NULL
         self.func = None
+        self.py_func = _py_func
+        self._seen_types = set()
+        self._jit = _jit
+
+    @classmethod
+    def decorate(cls, func):
+        arity = len(inspect.getargspec(func).args)
+        return cls(func.func_name, func.__doc__ or '', arity, _py_func=func)
 
     def add_specialization(self, llvm_function):
         assert len(llvm_function.args)==self.arity, "Bad arity"
@@ -65,7 +81,7 @@ cdef class UFuncWrapper:
             nfuncs,  #ntypes
             self.arity,
             1,
-            -1, # PyUFunc_None,
+            1 if self.arity==2 else -1,
             self.__name__,
             self.doc,   #__doc__
             0)
@@ -76,25 +92,64 @@ cdef class UFuncWrapper:
         if self.functions is not NULL:
             free(self.functions)
 
+    def _maybe_create_specialization_for_args(self, args):
+        if self.py_func is None:
+            return
+        args = tuple((np.array(a) if not isinstance(a, np.ndarray) else a)
+                     for a in args)
+        argtypes = tuple(a.dtype for a in args)
+        self._maybe_create_specialization_for_types(argtypes)
+
+    def _maybe_create_specialization_for_types(self, argtypes):
+        if argtypes not in self._seen_types:
+            self._seen_types.add(argtypes)
+            argtypes = [_dtype_to_numba(a) for a in argtypes]
+            jitted = self._jit(argtypes=argtypes, nopython=True)(self.py_func)
+            self.add_specialization(jitted.lfunc)
+
     def __call__(self, *args, **kw):
+        self._maybe_create_specialization_for_args(args)
         if self.func is not None:
             return self.func(*args, **kw)
 
+    def _maybe_create_specialization_for_reducer_args(self, args):
+        a = args[0]
+        dtype = np.array(a).dtype if not isinstance(a, np.ndarray) else a.dtype
+        self._maybe_create_specialization_for_types((dtype,dtype))
+
     def reduce(self, *args, **kw):
+        self._maybe_create_specialization_for_reducer_args(args)
         if self.func is not None:
             return self.func.reduce(*args, **kw)
 
     def reduceAt(self, *args, **kw):
+        self._maybe_create_specialization_for_reducer_args(args)
         if self.func is not None:
             return self.func.reduceAt(*args, **kw)
 
     def accumulate(self, *args, **kw):
+        self._maybe_create_specialization_for_reducer_args(args)
         if self.func is not None:
             return self.func.accumulate(*args, **kw)
 
 
+_numpy_to_numba = {
+    np.bool_: numba.bool_,
+    np.int8: numba.int8,
+    np.int16: numba.int16,
+    np.int32: numba.int32,
+    np.int64: numba.int64,
+    np.float32: numba.float32,
+    np.float64: numba.double,
+}
+_dtype_to_numba_map = dict((np.dtype(k),v) for k,v in _numpy_to_numba.items())
+
+def _dtype_to_numba(dtype):
+    return _dtype_to_numba_map[dtype]
+        
 
 _llvm_ty_str_to_numpy = {
+    'i1'     : np.bool_,
     'i8'     : np.int8,
     'i16'    : np.int16,
     'i32'    : np.int32,

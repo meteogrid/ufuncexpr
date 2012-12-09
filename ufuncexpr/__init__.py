@@ -100,9 +100,9 @@ class UFuncExpression(object):
 
     >>> f6 = UFuncExpression("(a+1)*b", _backend='ufunc')
     >>> f6.reduce(range(6))
-    325.0
+    325
     >>> f6.accumulate(range(6))
-    array([   0.,    1.,    4.,   15.,   64.,  325.])
+    array([  0,   1,   4,  15,  64, 325])
     """
 
     _serial = count(0)
@@ -113,6 +113,7 @@ class UFuncExpression(object):
         inst = cls._cache.get(key)
         if inst is None:
             inst = cls._cache[key] = cls._new()
+            inst._init(expression, namespace, **kw)
         return inst
 
     @classmethod
@@ -120,10 +121,10 @@ class UFuncExpression(object):
         """Subclasses should override to call parent __new__"""
         return object.__new__(cls)
 
-    def __init__(self, expression, namespace=None, **kw):
+    def _init(self, expression, namespace=None, **kw):
         namespace = namespace if namespace is not None else dict(kw)
         self._initargs = (expression, namespace)
-        backend = kw.pop('_backend', 'multiiter')
+        backend = kw.pop('_backend', 'ufunc')
         def _vectorize(*args, **kw):
             kw = dict(kw, backend=backend)
             return vectorize.vectorize(*args, **kw) 
@@ -136,8 +137,8 @@ class UFuncExpression(object):
 
     def _decorate_function(self, funcdef):
         signatures = [
-            _N('Str', 'i(%s)'%(','.join(['i']*len(funcdef.args.args)))),
-            _N('Str', 'd(%s)'%(','.join(['d']*len(funcdef.args.args)))),
+            #_N('Str', 'i(%s)'%(','.join(['i']*len(funcdef.args.args)))),
+            #_N('Str', 'd(%s)'%(','.join(['d']*len(funcdef.args.args)))),
         ]
         deco = _N('Call',
             func=_N('Name', '__vectorize__', _N('Load')),
@@ -279,9 +280,10 @@ class TransformExpressionToFunction(ast.NodeTransformer):
         raise _syntax_error(node, "Cannot define functions inside expressions")
 
     def visit_Call(self, node):
-        macro = self._macros.get(node.func.id)
-        if macro is not None:
-            return macro(map(self.visit, node.args))
+        if hasattr(node.func, 'id'):
+            macro = self._macros.get(node.func.id)
+            if macro is not None:
+                return macro(map(self.visit, node.args))
         return self.generic_visit(node)
 
 

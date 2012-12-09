@@ -50,7 +50,7 @@ class MultiIterFunc(object):
         arg_types = tuple(a.dtype for a in args)
         if arg_types not in self._func_map:
             argtypes = map(_dtype_to_numba, arg_types)
-            jitted = numba.jit(argtypes=argtypes)(self.py_func)
+            jitted = numba.jit(argtypes=argtypes, nopython=True)(self.py_func)
             self.add_specialization(jitted.lfunc)
         ret_type, func = self._func_map[arg_types]
         return func, args, ret_type
