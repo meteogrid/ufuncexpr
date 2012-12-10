@@ -29,7 +29,7 @@ class UFuncVectorizer(object):
         return cls(func.func_name, func.__doc__ or '', arity, _py_func=func)
 
     def add_specialization(self, llvm_function):
-        builder = UFuncBuilder(llvm_function, optimize=True)
+        builder = UFuncBuilder(llvm_function, optimization_level=3)
         assert builder.nin==self.arity and builder.nout==1, "Bad arity"
         lfunc = builder.ufunc
         self.llvm_functions += (lfunc,)
@@ -89,30 +89,3 @@ class UFuncVectorizer(object):
         self._maybe_create_specialization_for_reducer_args(args)
         if self.func is not None:
             return self.func.accumulate(*args, **kw)
-
-
-
-
-def make_loop_func_from_llvm_func(func, optimize=True):
-    """
-    Generates IR for a function of type PyUFuncGenericFunction which
-    calls `func` to compute each element. The generated code looks something
-    like the following C code. N is the number of arguments. There is only
-    one output variable implemented at the moment.
-
-    void
-    wrapper(char **args, ssize_t *dimensions, ssize_t *steps, void *data)
-    {
-        ssize_t i, n=dimensions[0];
-
-        for (i=0; i<n; i++) {
-            *((return_type*) (args[N] + steps[N]*i)) = wrapped_func(
-                *((arg0_type*) (args[0] + steps[0]*i)),
-                *((arg1_tye*) (args[1] + steps[1]*i)),
-                ....
-                *((argN_type*) (args[N-1] + steps[N-1]*i)));
-        }
-    }
-    """
-    
-    return builder.ufunc

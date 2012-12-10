@@ -17,10 +17,10 @@ PyUFuncGenericFunction_t = Type.function(Type.void(), [
 
 class UFuncBuilder(object):
     prefix = '__PyUFuncGenericFunction_'
-    def __init__(self, func, name=None, optimize=False):
+    def __init__(self, func, name=None, optimization_level=3):
         self.func = func
         self.name = name if name is not None else self.prefix+func.name
-        self.optimize = optimize
+        self.optimization_level = optimization_level
         self.module = func.module
         self.in_args = [a for a in self.func.args
                         if not isinstance(a.type, lc.PointerType)]
@@ -48,7 +48,7 @@ class UFuncBuilder(object):
             return self.module.get_function_named(self.name)
         else:
             ufunc = self._build_ufunc()
-            if self.optimize:
+            if self.optimization_level:
                 self.optimize_loop_func()
             return ufunc
 
@@ -194,13 +194,14 @@ class UFuncBuilder(object):
         C.b.call(self.func, func_args)
 
     #@syncronized FIXME
-    def optimize_loop_func(self, opt_level=3):
+    def optimize_loop_func(self):
         self.func.add_attribute(lc.ATTR_ALWAYS_INLINE)
         try:
             pmb = lp.PassManagerBuilder.new()
-            pmb.opt_level = opt_level
+            pmb.opt_level = self.optimization_level
             pmb.vectorize = True
             fpm = lp.PassManager.new()
+            fpm.add(self.module.owner.target_data)
             fpm.add(lp.PASS_ALWAYS_INLINE)
             pmb.populate(fpm)
             fpm.run(self.module)

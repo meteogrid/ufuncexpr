@@ -18,7 +18,7 @@ setup(
     license="BSD",
     packages=['ufuncexpr'],
     install_requires=['numba'],
-    tests_require=['nose'],
+    tests_require=['nose', 'unittest2'],
     test_suite="nose.collector",
     ext_modules = [
         Extension('ufuncexpr._ufuncwrapper',
