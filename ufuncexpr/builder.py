@@ -1,11 +1,11 @@
-from llvm import core as lc
+from llvm import core as lc, passes as lp
 from llvm.core import Constant, Type, Function, Builder
 
-from .util import (optimize_loop_func, dtype_to_numba, llvm_ty_to_dtype,
-                   determine_pointer_size)
+from .util import dtype_to_numba, llvm_ty_to_dtype, determine_pointer_size
 
 
 ssize_t = Type.int(determine_pointer_size())
+Ptr = Type.pointer
 
 # PyUFuncGenericFunction
 PyUFuncGenericFunction_t = Type.function(Type.void(), [
@@ -49,8 +49,75 @@ class UFuncBuilder(object):
         else:
             ufunc = self._build_ufunc()
             if self.optimize:
-                optimize_loop_func(ufunc, self.func)
+                self.optimize_loop_func()
             return ufunc
+
+    def _context(self):
+        _arg_ixs = [Constant.int(ssize_t, i) for i in xrange(self.nin)]
+        _out_ixs = [Constant.int(ssize_t, i)
+                       for i in xrange(self.nin, self.nin+self.nout)]
+        ufunc = self._new_ufunc()
+        _args, _dimensions, _steps = ufunc.args[:3]
+        module = self.module
+        entry_bb = ufunc.append_basic_block('entry')
+        builder = Builder.new(entry_bb)
+        deref = self._make_deref(builder)
+        zero = Constant.int(ssize_t, 0)
+        # Load constants from arguments,
+        builder.position_at_end(entry_bb)
+        num_iterations = deref(_dimensions, [zero], 'num_iterations')
+        arg_bases = [deref(_args, [i], 'abase') for i in _arg_ixs]
+        arg_steps = [deref(_steps, [i], 'astep') for i in _arg_ixs]
+        result_bases = [deref(_args, [i], 'rbase') for i in _out_ixs]
+        result_steps = [deref(_steps, [i], 'rstep') for i in _out_ixs]
+
+        return type('_BContext', (object,), dict(
+            zero = zero,
+            func = ufunc,
+            entry_bb = entry_bb,
+            b = builder,
+            num_iterations = num_iterations,
+            arg_bases = arg_bases,
+            arg_steps = arg_steps,
+            result_bases = result_bases,
+            result_steps = result_steps,
+            store = staticmethod(self._make_store(builder)),
+            deref = staticmethod(deref),
+        ))
+
+    @staticmethod
+    def _make_deref(builder):
+        def deref(ptr, indices, name='tmp', cast=None, invariant=True, load=True):
+            addr = builder.gep(ptr, indices, name+'_addr')
+            if cast is not None and addr.type!=cast:
+                addr = builder.bitcast(addr, cast)
+            if load:
+                return builder.load(addr, name, invariant=invariant)
+            else:
+                return addr
+        return deref
+
+    def _make_store(self, builder):
+        def store(value, address, cast=None, nontemporal=True):
+            if cast is not None and address.type.pointee!=cast:
+               address = builder.bitcast(address, cast)
+            st = builder.store(value, address)
+            if nontemporal:
+                st.set_metadata('nontemporal',
+                    lc.MetaData.get(self.module, [Constant.int(Type.int(), 1)]))
+            return st
+        return store
+
+    def _new_ufunc(self):
+        ufunc = Function.new(self.module, PyUFuncGenericFunction_t, self.name)
+        for a in ufunc.args:
+            a.add_attribute(lc.ATTR_NO_ALIAS)
+        _args, _dimensions, _steps = ufunc.args[:3]
+        _args.name = "args"
+        _dimensions.name='dimensions'
+        _steps.name='steps'
+        return ufunc
+
 
     def _build_ufunc(self):
         """
@@ -73,71 +140,69 @@ class UFuncBuilder(object):
             }
         }
         """
-        module = self.module
-        func = self.func
-        return_type = self.return_type
-        name = self.name
-        n_args = self.nin
-        nin = Constant.int(ssize_t, self.nin)
-        zero = Constant.int(ssize_t, 0)
-        one = Constant.int(ssize_t, 1)
-        nums = [Constant.int(ssize_t, i) for i in xrange(n_args)]
-        ufunc = Function.new(module, PyUFuncGenericFunction_t, name)
-        for a in ufunc.args:
-            a.add_attribute(lc.ATTR_NO_ALIAS)
-
-        # Build it
-        block = ufunc.append_basic_block('entry')
-        builder = Builder.new(block)
-        _args, _dimensions, _steps = ufunc.args[:3]
-        _args.name = "args"; _dimensions.name='dimensions'; _steps.name='steps'
-
-        def deref(ptr, indices, name='tmp', cast=None):
-            addr = builder.gep(ptr, indices, name+'_addr')
-            if cast is not None and addr.type!=cast:
-                addr = builder.bitcast(addr, cast)
-            return builder.load(addr, name, invariant=True)
-
-        # Load constants from arguments
-        num_iterations = deref(_dimensions, [zero], 'idx')
-        arg_bases = [deref(_args, [nums[i]], 'base') for i in xrange(n_args)]
-        result_base = deref(_args, [nin], 'rbase')
-        arg_steps = [deref(_steps, [nums[i]], 'step') for i in xrange(n_args)]
-        result_step = deref(_steps, [nin], 'rstep')
-        loop_header_block = ufunc.append_basic_block('loop-header')
-        builder.branch(loop_header_block)
+        C = self._context()
+        loop_header_block = C.func.append_basic_block('loop-header')
+        C.b.branch(loop_header_block)
 
         # loop-header block
-        builder.position_at_end(loop_header_block)
-        phi = builder.phi(ssize_t, 'loop_var')
-        phi.add_incoming(zero, block)
+        C.b.position_at_end(loop_header_block)
+        idx = C.b.phi(ssize_t, 'loop_var')
+        idx.add_incoming(C.zero, C.entry_bb)
 
-        end_cond = builder.icmp(lc.ICMP_SLT, phi, num_iterations)
-        loop_block = ufunc.append_basic_block('loop')
-        after_block = ufunc.append_basic_block('afterloop')
-        builder.cbranch(end_cond, loop_block, after_block)
+        end_cond = C.b.icmp(lc.ICMP_SLT, idx, C.num_iterations)
+        loop_block = C.func.append_basic_block('loop')
+        after_block = C.func.append_basic_block('afterloop')
+        C.b.cbranch(end_cond, loop_block, after_block)
 
-        # loop block
-        builder.position_at_end(loop_block)
-        Ptr = Type.pointer
-        func_args = [deref(base, [builder.mul(step, phi)], cast=Ptr(arg.type))
-                     for base, step, arg in zip(arg_bases, arg_steps, func.args)]
-        result = builder.call(func, func_args)
-        result_addr = builder.gep(result_base, [builder.mul(result_step, phi)])
-        st = builder.store(result,
-                           builder.bitcast(result_addr, Type.pointer(return_type)))
-        const_one = Constant.int(Type.int(), 1)
-        md = lc.MetaData.get(module, [const_one])
-        st.set_metadata('nontemporal', md)
-        
+        # loop body block
+        C.b.position_at_end(loop_block)
+        if self.returns_value:
+            self._call_and_store_result(C, idx)
+        else:
+            self._call_and_store_result_out_args(C, idx)
 
         # calculate next loop value and branch
-        next_value = builder.add(phi, one, 'next')
-        phi.add_incoming(next_value, loop_block)
-        builder.branch(loop_header_block)
+        next_value = C.b.add(idx, Constant.int(ssize_t, 1), 'next')
+        idx.add_incoming(next_value, loop_block)
+        C.b.branch(loop_header_block)
 
         # after-block
-        builder.position_at_end(after_block)
-        builder.ret_void()
+        C.b.position_at_end(after_block)
+        C.b.ret_void()
+        return C.func
 
-        return ufunc
+    def _call_and_store_result(self, context, idx):
+        C = context
+        func_args = [
+            C.deref(base, [C.b.mul(step, idx)], cast=Ptr(arg.type))
+                 for base, step, arg in
+                     zip(C.arg_bases, C.arg_steps, self.in_args)]
+        result = C.b.call(self.func, func_args)
+        result_addr = C.b.gep(C.result_bases[0], [C.b.mul(C.result_steps[0], idx)])
+        C.store(result, result_addr, Type.pointer(self.return_type))
+
+    def _call_and_store_result_out_args(self, context, idx):
+        C = context
+        func_args = [
+            C.deref(base, [C.b.mul(step, idx)], cast=Ptr(arg.type))
+                 for base, step, arg in
+                     zip(C.arg_bases, C.arg_steps, self.in_args)]
+        func_args.extend(
+            C.deref(base, [C.b.mul(step, idx)], cast=arg.type, load=False)
+                 for base, step, arg in
+                     zip(C.result_bases, C.result_steps, self.out_args))
+        C.b.call(self.func, func_args)
+
+    #@syncronized FIXME
+    def optimize_loop_func(self, opt_level=3):
+        self.func.add_attribute(lc.ATTR_ALWAYS_INLINE)
+        try:
+            pmb = lp.PassManagerBuilder.new()
+            pmb.opt_level = opt_level
+            pmb.vectorize = True
+            fpm = lp.PassManager.new()
+            fpm.add(lp.PASS_ALWAYS_INLINE)
+            pmb.populate(fpm)
+            fpm.run(self.module)
+        finally:
+            self.func.remove_attribute(lc.ATTR_ALWAYS_INLINE)

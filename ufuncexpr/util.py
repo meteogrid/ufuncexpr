@@ -1,5 +1,4 @@
 from ctypes import sizeof, c_void_p
-from llvm import core as lc, passes as lp
 import numpy as np
 import numba
 
@@ -12,22 +11,6 @@ def dtype_to_numba(dtype):
 def determine_pointer_size():
     return sizeof(c_void_p) * 8
         
-
-def optimize_loop_func(lfunc, func, opt_level=3):
-    func.add_attribute(lc.ATTR_ALWAYS_INLINE)
-    try:
-        _optimize_func(lfunc)
-    finally:
-        func.remove_attribute(lc.ATTR_ALWAYS_INLINE)
-
-def _optimize_func(lfunc, opt_level=3):
-    pmb = lp.PassManagerBuilder.new()
-    pmb.opt_level = opt_level
-    pmb.vectorize = True
-    fpm = lp.PassManager.new()
-    fpm.add(lp.PASS_ALWAYS_INLINE)
-    pmb.populate(fpm)
-    fpm.run(lfunc.module)
 
 
 

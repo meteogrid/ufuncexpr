@@ -7,6 +7,9 @@ from shutil import copyfileobj
 import llvm.core as lc
 import llvm.ee as ee
 
+from .builder import UFuncBuilder
+from ._ufuncwrapper import UFuncWrapper
+
 class CModule(object):
     BITCODE_EXT = '.bc'
     _stdout = None
@@ -23,6 +26,12 @@ class CModule(object):
             self.module.add_library(l)
         self.module.verify()
         self._ee = ee.ExecutionEngine.new(self.module)
+
+    @property
+    def functions(self):
+        return [f.name for f in self.module.functions
+                if not f.name.startswith(UFuncBuilder.prefix)
+                and f.linkage==lc.LINKAGE_EXTERNAL]
 
     def save_bitcode_to_disk(self):
         self._create_module_from_source_files(self.sources, True)
@@ -55,3 +64,20 @@ class CModule(object):
             print>>sys.stderr, self._stderr
             raise RuntimeError(str(p.returncode))
         return output
+
+    def get_ufunc(self, name, doc=''):
+        llvm_function = self.module.get_function_named(name)
+        builder = UFuncBuilder(llvm_function, optimize=True)
+        functions = [builder.ufunc]
+        types = [d.num for  d in builder.dtypes]
+        return UFuncWrapper(functions, types,
+            nin=builder.nin,
+            nout=builder.nout,
+            name=name,
+            doc=doc
+            )
+
+    def __getattr__(self, name):
+        if name not in self.functions:
+            raise AttributeError(name)
+        return self.get_ufunc(name)
