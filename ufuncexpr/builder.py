@@ -142,6 +142,8 @@ class UFuncBuilder(object):
         """
         C = self._context()
         loop_header_block = C.func.append_basic_block('loop-header')
+        loop_block = C.func.append_basic_block('loop')
+        after_block = C.func.append_basic_block('afterloop')
         C.b.branch(loop_header_block)
 
         # loop-header block
@@ -150,8 +152,6 @@ class UFuncBuilder(object):
         idx.add_incoming(C.zero, C.entry_bb)
 
         end_cond = C.b.icmp(lc.ICMP_SLT, idx, C.num_iterations)
-        loop_block = C.func.append_basic_block('loop')
-        after_block = C.func.append_basic_block('afterloop')
         C.b.cbranch(end_cond, loop_block, after_block)
 
         # loop body block
@@ -200,6 +200,7 @@ class UFuncBuilder(object):
             pmb = lp.PassManagerBuilder.new()
             pmb.opt_level = self.optimization_level
             pmb.vectorize = True
+            pmb.use_inliner_with_threshold(5000)
             fpm = lp.PassManager.new()
             fpm.add(self.module.owner.target_data)
             fpm.add(lp.PASS_ALWAYS_INLINE)

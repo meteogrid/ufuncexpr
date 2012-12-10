@@ -7,14 +7,19 @@ __all__ = ['UFuncWrapper']
 
 cdef class UFuncWrapper:
 
+    cdef readonly object name
     cdef readonly object func
     cdef readonly tuple llvm_functions
 
     cdef PyUFuncGenericFunction *functions
     cdef char *types
 
+    cdef object _doc
+
     def __init__(self, loop_functions, types, int nin, int nout=1,
-                 char *name='test', char *doc=''):
+                 name='test', doc=''):
+        self.name = name
+        self._doc = doc
         self.llvm_functions = tuple(loop_functions)
         cdef int nfuncs = len(loop_functions)
         assert len(types)==nfuncs*(nin+nout), repr((len(types),nfuncs,nin,nout))
@@ -42,9 +47,9 @@ cdef class UFuncWrapper:
             nfuncs,  #ntypes
             nin,
             nout,
-            1 if nin==2 else -1,
-            name,
-            doc,   #__doc__
+            1 if (nin==2 and nout==1) else -1,
+            <char*>self.name,
+            <char*>self._doc,   #__doc__
             0)
 
     def __dealloc__(self):
@@ -58,3 +63,6 @@ cdef class UFuncWrapper:
 
     def __getattr__(self, k):
         return getattr(self.func, k)
+     
+    def __repr__(self):
+        return '<UFuncWrapper %s>'%self.name

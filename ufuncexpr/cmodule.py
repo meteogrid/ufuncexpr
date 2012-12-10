@@ -45,7 +45,7 @@ class CModule(object):
             nin=builder.nin,
             nout=builder.nout,
             name=name,
-            doc=doc
+            doc=doc,
             )
 
     @property
@@ -61,6 +61,7 @@ class CModule(object):
         pmb = lp.PassManagerBuilder.new()
         pmb.opt_level = self.optimization_level
         pmb.vectorize = True
+        pmb.use_inliner_with_threshold(5000)
         fpm = lp.PassManager.new()
         fpm.add(self.module.owner.target_data)
         fpm.add(lp.PASS_ALWAYS_INLINE)
@@ -70,22 +71,26 @@ class CModule(object):
     def _create_module_from_source_files(self, sources, save_bitcode=False):
         module = lc.Module.new(self.name)
         for source in sources:
-            if isinstance(source, basestring):
+            if hasattr(source, 'read'):
+                bitcode = StringIO(self._compile_to_bitcode(source))
+            else:
                 assembly_file = source[:source.rfind('.')] + self.BITCODE_EXT
                 if not os.path.exists(assembly_file) or\
                   os.path.getmtime(source)>os.path.getmtime(assembly_file):
-                    bitcode = StringIO(self._compile_to_bitcode(source))
+                    with open(source) as f:
+                        bitcode_str = self._compile_to_bitcode(f,
+                            cwd=os.path.dirname(source)
+                            )
+                    bitcode = StringIO(bitcode_str)
                     if save_bitcode:
                         copyfileobj(bitcode, open(assembly_file, 'w'))
                         bitcode.seek(0)
                 else:
                     bitcode = open(assembly_file)
-            else:
-                bitcode = StringIO(self._compile_to_bitcode(source))
             module.link_in(lc.Module.from_bitcode(bitcode))
         return module
              
-    def _compile_to_bitcode(self, source):
+    def _compile_to_bitcode(self, source, cwd=None):
         p = subprocess.Popen(
             ['clang', '-Wall', '-emit-llvm',
              '-x', self.language,
@@ -93,6 +98,7 @@ class CModule(object):
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            cwd=cwd,
         )
         if hasattr(source, 'read'):
             source = source.read()

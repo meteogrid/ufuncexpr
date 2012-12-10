@@ -12,8 +12,10 @@ __all__ = ['UFuncVectorizer']
 
 class UFuncVectorizer(object):
 
-    def __init__(self, name, doc, arity, _jit=numba.jit, _py_func=None):
+    def __init__(self, name, doc, arity, _jit=numba.jit, _py_func=None,
+                 optimization_level=3):
         self.__name__ = name
+        self.optimization_level = optimization_level
         self.doc = doc
         self.arity = arity
         self.llvm_functions = ()
@@ -29,7 +31,8 @@ class UFuncVectorizer(object):
         return cls(func.func_name, func.__doc__ or '', arity, _py_func=func)
 
     def add_specialization(self, llvm_function):
-        builder = UFuncBuilder(llvm_function, optimization_level=3)
+        builder = UFuncBuilder(llvm_function,
+                               optimization_level=self.optimization_level)
         assert builder.nin==self.arity and builder.nout==1, "Bad arity"
         lfunc = builder.ufunc
         self.llvm_functions += (lfunc,)
@@ -41,7 +44,7 @@ class UFuncVectorizer(object):
             name=self.__name__,
             doc=self.doc
             )
-    
+
     def _sorted_functions_and_types(self):
         l = zip(self.types, self.llvm_functions)
         l.sort()
@@ -51,18 +54,17 @@ class UFuncVectorizer(object):
 
 
     def _maybe_create_specialization_for_args(self, args):
-        if self.py_func is None:
-            return
         args = tuple((np.array(a) if not isinstance(a, np.ndarray) else a)
                      for a in args)
         argtypes = tuple(a.dtype for a in args)
         self._maybe_create_specialization_for_types(argtypes)
 
     def _maybe_create_specialization_for_types(self, argtypes):
-        if argtypes not in self._seen_types:
+        if self.py_func is not None and argtypes not in self._seen_types:
             self._seen_types.add(argtypes)
             argtypes = [dtype_to_numba(a) for a in argtypes]
-            jitted = self._jit(argtypes=argtypes, nopython=True)(self.py_func)
+            dec = self._jit(argtypes=argtypes, nopython=True)
+            jitted = dec(self.py_func)
             self.add_specialization(jitted.lfunc)
 
     def __call__(self, *args, **kw):
