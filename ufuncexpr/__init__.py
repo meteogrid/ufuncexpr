@@ -136,14 +136,9 @@ class UFuncExpression(object):
         self._args, self.func = self._create_ufunc_from_expression(expression)
 
     def _decorate_function(self, funcdef):
-        signatures = [
-            #_N('Str', 'i(%s)'%(','.join(['i']*len(funcdef.args.args)))),
-            #_N('Str', 'd(%s)'%(','.join(['d']*len(funcdef.args.args)))),
-        ]
         deco = _N('Call',
             func=_N('Name', '__vectorize__', _N('Load')),
-            args=[_N('List', elts=signatures, ctx=_N('Load'))],
-            kwargs=None, starargs=None, keywords=[])
+            args=[], kwargs=None, starargs=None, keywords=[])
         funcdef.decorator_list.append(deco)
 
     def _create_ufunc_from_expression(self, expression):

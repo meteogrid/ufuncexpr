@@ -4,11 +4,12 @@ import subprocess
 from cStringIO import StringIO
 from shutil import copyfileobj
 
-import llvm.core as lc, llvm.passes as lp
+import llvm.core as lc
 import llvm.ee as ee
 
 from .builder import UFuncBuilder
 from ._ufuncwrapper import UFuncWrapper
+from .util import optimize_llvm_function
 
 class CModule(object):
     BITCODE_EXT = '.bc'
@@ -31,8 +32,6 @@ class CModule(object):
         eb.opt(self.optimization_level)
         #eb.mattrs("-sse1,-sse2,-sse3")
         self._ee = eb.create()
-        if self.optimization_level:
-            self._optimize()
 
 
     def get_ufunc(self, name, doc=''):
@@ -40,6 +39,7 @@ class CModule(object):
         builder = UFuncBuilder(llvm_function,
             optimization_level=self.optimization_level)
         functions = [builder.ufunc]
+        optimize_llvm_function(functions[0], self.optimization_level)
         types = [d.num for  d in builder.dtypes]
         return UFuncWrapper(functions, types,
             nin=builder.nin,
@@ -56,17 +56,6 @@ class CModule(object):
 
     def save_bitcode_to_disk(self):
         self._create_module_from_source_files(self.sources, True)
-
-    def _optimize(self):
-        pmb = lp.PassManagerBuilder.new()
-        pmb.opt_level = self.optimization_level
-        pmb.vectorize = True
-        pmb.use_inliner_with_threshold(5000)
-        fpm = lp.PassManager.new()
-        fpm.add(self.module.owner.target_data)
-        fpm.add(lp.PASS_ALWAYS_INLINE)
-        pmb.populate(fpm)
-        fpm.run(self.module)
 
     def _create_module_from_source_files(self, sources, save_bitcode=False):
         module = lc.Module.new(self.name)

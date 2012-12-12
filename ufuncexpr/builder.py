@@ -1,7 +1,8 @@
-from llvm import core as lc, passes as lp
+from llvm import core as lc
 from llvm.core import Constant, Type, Function, Builder
 
-from .util import dtype_to_numba, llvm_ty_to_dtype, determine_pointer_size
+from .util import dtype_to_numba, llvm_ty_to_dtype, determine_pointer_size,\
+                  optimize_llvm_function
 
 
 ssize_t = Type.int(determine_pointer_size())
@@ -49,7 +50,7 @@ class UFuncBuilder(object):
         else:
             ufunc = self._build_ufunc()
             if self.optimization_level:
-                self.optimize_loop_func()
+                optimize_llvm_function(ufunc, self.optimization_level)
             return ufunc
 
     def _context(self):
@@ -192,19 +193,3 @@ class UFuncBuilder(object):
                  for base, step, arg in
                      zip(C.result_bases, C.result_steps, self.out_args))
         C.b.call(self.func, func_args)
-
-    #@syncronized FIXME
-    def optimize_loop_func(self):
-        self.func.add_attribute(lc.ATTR_ALWAYS_INLINE)
-        try:
-            pmb = lp.PassManagerBuilder.new()
-            pmb.opt_level = self.optimization_level
-            pmb.vectorize = True
-            pmb.use_inliner_with_threshold(5000)
-            fpm = lp.PassManager.new()
-            fpm.add(self.module.owner.target_data)
-            fpm.add(lp.PASS_ALWAYS_INLINE)
-            pmb.populate(fpm)
-            fpm.run(self.module)
-        finally:
-            self.func.remove_attribute(lc.ATTR_ALWAYS_INLINE)
