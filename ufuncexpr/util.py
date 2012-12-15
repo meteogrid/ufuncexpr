@@ -13,7 +13,7 @@ def dtype_to_numba(dtype):
 def determine_pointer_size():
     return sizeof(c_void_p) * 8
         
-def optimize_llvm_function(func, opt_level=3, inline_threshold=5000):
+def optimize_llvm_function(func, opt_level=3, inline_threshold=15000):
     pmb = lp.PassManagerBuilder.new()
     pmb.opt_level = opt_level
     pmb.vectorize = True
