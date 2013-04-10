@@ -34,7 +34,7 @@ class CModule(object):
         self.language = language
         self.module = self._create_module_from_source_files(sources)
         for l in self.libraries:
-            self.module.add_library(l)
+            lc.load_library_permanently(find_library(l))
         self.module.verify()
         eb = ee.EngineBuilder.new(self.module)
         eb.opt(self.optimization_level)
@@ -120,7 +120,8 @@ class CModule(object):
                         bitcode.seek(0)
                 else:
                     bitcode = open(assembly_file)
-            module.link_in(lc.Module.from_bitcode(bitcode))
+            mod = lc.Module.from_bitcode(bitcode)
+            module.link_in(mod, preserve=True)
         return module
              
     def _compile_to_bitcode(self, source, cwd=None):

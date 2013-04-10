@@ -3,6 +3,7 @@ import numpy as np
 import numba
 
 import llvm.passes as lp
+from llvm.ee import TargetMachine
 
 def llvm_ty_to_dtype(ty):
     return np.dtype(_llvm_ty_to_numpy(ty))
@@ -14,14 +15,10 @@ def determine_pointer_size():
     return sizeof(c_void_p) * 8
         
 def optimize_llvm_function(func, opt_level=3, inline_threshold=15000):
-    pmb = lp.PassManagerBuilder.new()
-    pmb.opt_level = opt_level
-    pmb.vectorize = True
-    pmb.use_inliner_with_threshold(inline_threshold)
-    fpm = lp.PassManager.new()
-    fpm.add(func.module.owner.target_data)
-    pmb.populate(fpm)
-    fpm.run(func.module)
+    tm = TargetMachine.new(opt=opt_level)
+    pm = lp.build_pass_managers(tm, opt=opt_level, loop_vectorize=True, fpm=False,
+                                inline_threshold=inline_threshold).pm
+    pm.run(func.module)
 
 
 

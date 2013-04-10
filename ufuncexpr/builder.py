@@ -13,7 +13,7 @@ PyUFuncGenericFunction_t = Type.function(Type.void(), [
     Type.pointer(Type.pointer(Type.int(8))), # char **data
     Type.pointer(ssize_t),                   # ssize_t *dimensions
     Type.pointer(ssize_t),                   # ssize_t *steps
-    Type.pointer(Type.void()),               # void *data
+    Type.pointer(Type.int(8)),               # void *data
     ])
 
 class UFuncBuilder(object):

@@ -1,4 +1,5 @@
 from numpy cimport PyUFuncGenericFunction, PyUFunc_FromFuncAndData, import_ufunc
+from llvm.ee import ExecutionEngine
 from libc.stdlib cimport malloc, free
 
 import_ufunc()
@@ -14,7 +15,7 @@ cdef class UFuncWrapper:
     cdef PyUFuncGenericFunction *functions
     cdef char *types
 
-    cdef object _doc
+    cdef object _doc, _ee
 
     def __init__(self, loop_functions, types, int nin, int nout=1,
                  name='test', doc=''):
@@ -26,7 +27,11 @@ cdef class UFuncWrapper:
 
         self.functions = <PyUFuncGenericFunction*>malloc(
             sizeof(PyUFuncGenericFunction)*nfuncs)
-        gpf = loop_functions[0].module.owner.get_pointer_to_function
+        modules = list(set(f.module for f in loop_functions))
+        assert len(modules)==1
+        mod = modules[0].clone()
+        self._ee = ExecutionEngine.new(mod)
+        gpf = self._ee.get_pointer_to_function
         cdef long ptr=0
         cdef int i=0
         for i in range(nfuncs):
