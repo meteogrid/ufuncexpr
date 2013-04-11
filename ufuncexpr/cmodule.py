@@ -8,9 +8,8 @@ from ctypes.util import find_library
 import llvm.core as lc
 import llvm.ee as ee
 
-from .builder import UFuncBuilder
-from ._ufuncwrapper import UFuncWrapper
 from .util import optimize_llvm_function
+from .builder import MultipleReturnUFunc
 
 lc.load_library_permanently(find_library('stdc++'))
 
@@ -80,22 +79,20 @@ class CModule(object):
 
     def get_ufunc(self, name, doc=''):
         llvm_function = self.module.get_function_named(name)
-        builder = UFuncBuilder(llvm_function,
-            optimization_level=self.optimization_level)
-        functions = [builder.ufunc]
-        optimize_llvm_function(functions[0], self.optimization_level)
-        types = [d.num for  d in builder.dtypes]
-        return UFuncWrapper(functions, types,
-            nin=builder.nin,
-            nout=builder.nout,
-            name=name,
-            doc=doc,
-            )
+        def_ =  MultipleReturnUFunc(llvm_function)
+        llvm_ufunction = def_(llvm_function.module)
+        optimize_llvm_function(llvm_ufunction)
+        ptrlist = map(long, [self._ee.get_pointer_to_function(llvm_ufunction)])
+        tyslist = [d.num for  d in def_.dtypes]
+        from numba.vectorize import _internal
+        ufunc = _internal.fromfunc(ptrlist, [tyslist], def_.nin, def_.nout,
+                                   [None], None)
+        return ufunc
 
     @property
     def functions(self):
         return [f.name for f in self.module.functions
-                if not f.name.startswith(UFuncBuilder.prefix)
+                if not f.name.startswith(MultipleReturnUFunc.prefix)
                 and f.linkage==lc.LINKAGE_EXTERNAL]
 
     def save_bitcode_to_disk(self):
@@ -121,7 +118,7 @@ class CModule(object):
                 else:
                     bitcode = open(assembly_file)
             mod = lc.Module.from_bitcode(bitcode)
-            module.link_in(mod, preserve=True)
+            module.link_in(mod)
         return module
              
     def _compile_to_bitcode(self, source, cwd=None):

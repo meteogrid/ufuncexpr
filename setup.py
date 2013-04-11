@@ -1,12 +1,5 @@
 import numpy
-from setuptools import setup, Extension
-
-try:
-    from Cython.Distutils import build_ext
-    extra = dict(cmdclass=dict(build_ext=build_ext))
-except ImportError:
-    # Assume .c file is generated
-    extra = {}
+from setuptools import setup
 
 setup(
     name='ufuncexpr',
@@ -19,13 +12,7 @@ setup(
     packages=['ufuncexpr'],
     install_requires=['numba'],
     tests_require=['nose', 'unittest2'],
-    test_suite="nose.collector",
-    ext_modules = [
-        Extension('ufuncexpr._ufuncwrapper',
-                  ['ufuncexpr/_ufuncwrapper.pyx'],
-                  include_dirs=[numpy.get_include()])
-        ],
-    **extra
+    test_suite="nose.collector"
     )
     
 
