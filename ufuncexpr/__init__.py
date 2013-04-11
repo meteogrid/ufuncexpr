@@ -5,7 +5,7 @@ from itertools import count
 
 import ctypes, ctypes.util
 
-from . import vectorize
+from numba import vectorize
 
 
 __all__ = ['evaluate', 'UFuncExpression']
@@ -16,17 +16,17 @@ def evaluate(expression, _namespace=None, **namespace):
     """
     >>> a = 4
     >>> evaluate("a+2")
-    6
+    6.0
     >>> def f(a,b):
     ...     return evaluate("a+b+2")
     >>> f(1,6)
-    9
+    9.0
 
     >>> import numpy as np
     >>> b = np.array([range(2),range(2)])
     >>> evaluate("b+2")
-    array([[2, 3],
-           [2, 3]])
+    array([[ 2.,  3.],
+           [ 2.,  3.]])
     """
     namespace = _namespace if _namespace else namespace
     if not namespace:
@@ -45,13 +45,13 @@ class UFuncExpression(object):
 
     >>> f1 = UFuncExpression('a+b')
     >>> f1(1,3)
-    4
+    4.0
 
     Variables can be bound at compile time
 
     >>> f2 = UFuncExpression('a+b', b=3)
     >>> f2(2)
-    5
+    5.0
 
     Functions are cached
 
@@ -65,7 +65,7 @@ class UFuncExpression(object):
     The return value is always the value of the last expression.
 
     >>> UFuncExpression("c=a+b;c+1")(a=1, b=4)
-    6
+    6.0
 
     Can call functions form libm
 
@@ -76,19 +76,19 @@ class UFuncExpression(object):
 
     >>> f5 = UFuncExpression("where(a>1,a,b)")
     >>> f5(a=0.5, b=1), f5(a=2, b=4)
-    (1.0, 2)
+    (1.0, 2.0)
 
     Can use 'cond(*cases, default)' macro. 
 
     >>> f6 = UFuncExpression("cond((a>1,a),b)")
     >>> f6(a=0.5, b=1), f6(a=2, b=4)
-    (1.0, 2)
+    (1.0, 2.0)
 
     Can use 'switch(var, *cases, default)' macro. 
 
     >>> f7 = UFuncExpression("switch(a, ((1,2,3),0), ((4,5,6),1), -1)")
     >>> f7(a=1), f7(a=3), f7(a=4), f7(7)
-    (0, 0, 1, -1)
+    (0.0, 0.0, 1.0, -1.0)
 
     Can pickle and unpickle UFuncExpression
     
@@ -100,9 +100,9 @@ class UFuncExpression(object):
 
     >>> f6 = UFuncExpression("(a+1)*b", _backend='ufunc')
     >>> f6.reduce(range(6))
-    325
+    325.0
     >>> f6.accumulate(range(6))
-    array([  0,   1,   4,  15,  64, 325])
+    array([   0.,    1.,    4.,   15.,   64.,  325.])
     """
 
     _serial = count(0)
@@ -124,10 +124,8 @@ class UFuncExpression(object):
     def _init(self, expression, namespace=None, **kw):
         namespace = namespace if namespace is not None else dict(kw)
         self._initargs = (expression, namespace)
-        backend = kw.pop('_backend', 'ufunc')
-        def _vectorize(*args, **kw):
-            kw = dict(kw, backend=backend)
-            return vectorize.vectorize(*args, **kw) 
+        def _vectorize(signatures):
+            return vectorize.vectorize(signatures)
         self.globals_ = dict(
             __vectorize__ = _vectorize
         )
@@ -136,9 +134,13 @@ class UFuncExpression(object):
         self._args, self.func = self._create_ufunc_from_expression(expression)
 
     def _decorate_function(self, funcdef):
+        signatures = [
+            _N('Str', 'double(%s)'%(','.join(['double']*len(funcdef.args.args)))),
+        ]
         deco = _N('Call',
             func=_N('Name', '__vectorize__', _N('Load')),
-            args=[], kwargs=None, starargs=None, keywords=[])
+            args=[_N('List', elts=signatures, ctx=_N('Load'))],
+            kwargs=None, starargs=None, keywords=[])
         funcdef.decorator_list.append(deco)
 
     def _create_ufunc_from_expression(self, expression):
