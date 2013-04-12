@@ -16,7 +16,7 @@ def determine_pointer_size():
         
 def optimize_llvm_function(func, opt_level=3, inline_threshold=15000):
     tm = TargetMachine.new(opt=opt_level)
-    pm = lp.build_pass_managers(tm, opt=opt_level,
+    pm = lp.build_pass_managers(tm, opt=opt_level, vectorize=True,
                                 loop_vectorize=True, fpm=False,
                                 inline_threshold=inline_threshold).pm
     pm.run(func.module)
