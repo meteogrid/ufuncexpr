@@ -10,6 +10,7 @@ import llvm.ee as ee
 
 from .util import optimize_llvm_function
 from .builder import MultipleReturnUFunc
+from ._ufuncwrapper import UFuncWrapper
 
 lc.load_library_permanently(find_library('stdc++'))
 
@@ -81,12 +82,12 @@ class CModule(object):
         llvm_function = self.module.get_function_named(name)
         def_ =  MultipleReturnUFunc(llvm_function)
         llvm_ufunction = def_(llvm_function.module)
-        optimize_llvm_function(llvm_ufunction)
-        ptrlist = map(long, [self._ee.get_pointer_to_function(llvm_ufunction)])
+        functions = [llvm_ufunction]
+        map(optimize_llvm_function, functions)
+        ptrlist = map(long, map(self._ee.get_pointer_to_function, functions))
         tyslist = [d.num for  d in def_.dtypes]
-        from numba.vectorize import _internal
-        ufunc = _internal.fromfunc(ptrlist, [tyslist], def_.nin, def_.nout,
-                                   [None], None)
+        ufunc = UFuncWrapper(functions, ptrlist, tyslist, def_.nin, def_.nout,
+                             name=name, doc="CModule wrapped C function")
         return ufunc
 
     @property

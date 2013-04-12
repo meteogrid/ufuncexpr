@@ -35,7 +35,6 @@ class MultipleReturnUFunc(CDefinition):
             const_steps.invariant = True
             arg_steps.append(const_steps)
 
-        self.cbuilder.debug(dimensions[0])
         with self.for_range(dimensions[0]) as (loop, item):
             callargs = []
             for i, arg in enumerate(self.in_args):
