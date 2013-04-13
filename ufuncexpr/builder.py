@@ -28,30 +28,34 @@ class MultipleReturnUFunc(CDefinition):
         func = self.depends(self.FuncDef)
 
         arg_ptrs = []
+        arg_steps = []
         for i in range(self.nin + self.nout):
-            arg = self.var_copy(args[i])
-            arg.invariant = True
-            arg_ptrs.append(arg)
+            arg_ptrs.append(self.var_copy(args[i]))
+            const_steps = self.var_copy(steps[i])
+            const_steps.invariant = True
+            arg_steps.append(const_steps)
 
         with self.for_range(dimensions[0]) as (loop, item):
             callargs = []
             for i, arg in enumerate(self.in_args):
-                casted = arg_ptrs[i].cast(C.pointer(arg.type))[item:][0]
-                callargs.append(casted)
+                casted = arg_ptrs[i].cast(C.pointer(arg.type))
+                callargs.append(casted.load())
 
             for i, arg in enumerate(self.out_args):
                 i += self.nin
-                casted = arg_ptrs[i].cast(arg.type)[item:]
+                casted = arg_ptrs[i].cast(arg.type)
                 callargs.append(casted)
 
             if self.returns_value:
                 res = func(*callargs, inline=True)
-                P = C.pointer(self.return_type)
-                retval_ptr = arg_ptrs[self.nin].cast(P)[item:].cast(P)
+                retval_ptr = arg_ptrs[self.nin].cast(C.pointer(self.return_type))
                 retval_ptr.store(res, nontemporal=True)
             else:
                 func(*callargs, inline=True)
 
+            for i in range(self.nin + self.nout):
+                # increment pointers
+                arg_ptrs[i].assign(arg_ptrs[i][arg_steps[i]:])
 
         self.ret()
 
