@@ -5,7 +5,7 @@ from itertools import count
 
 import ctypes, ctypes.util
 
-from numba import vectorize
+from . import vectorize
 
 
 __all__ = ['evaluate', 'UFuncExpression']

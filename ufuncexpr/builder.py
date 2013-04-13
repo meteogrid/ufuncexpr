@@ -2,12 +2,32 @@ from llvm.core import *
 from llvm_cbuilder import *
 import llvm_cbuilder.shortnames as C
 
-from .util import llvm_ty_to_dtype
+from .util import llvm_ty_to_dtype, optimize_llvm_function
+from ._ufuncwrapper import UFuncWrapper
+
+UFUNC_PREFIX = '__PyUFuncGenericFunction_'
+
+def make_ufunc(llvm_functions, engine, name=None, doc="ufuncexpr wrapped function"):
+    functions = []
+    tyslist = []
+    nin, nout = None, None
+    for llvm_function in llvm_functions:
+        def_ =  MultipleReturnUFunc(llvm_function)
+        if nin is None:
+            nin, nout = def_.nin, def_.nout
+        else:
+            assert (nin, nout) == (def_.nin, def_.nout)
+        tyslist.extend(d.num for  d in def_.dtypes)
+        functions.append(def_(llvm_function.module))
+    map(optimize_llvm_function, functions)
+    ptrlist = [long(engine.get_pointer_to_function(f)) for f in functions]
+    ufunc = UFuncWrapper(functions, ptrlist, tyslist, nin, nout,
+                         name=name or llvm_functions[0].name, doc=doc)
+    return ufunc
 
 class MultipleReturnUFunc(CDefinition):
     '''a generic ufunc that wraps the workload
     '''
-    prefix = '__PyUFuncGenericFunction_'
     _argtys_ = [
         ('args',       C.pointer(C.char_p), [ATTR_NO_ALIAS]),
         ('dimensions', C.pointer(C.intp), [ATTR_NO_ALIAS]),
@@ -35,7 +55,9 @@ class MultipleReturnUFunc(CDefinition):
             const_steps.invariant = True
             arg_steps.append(const_steps)
 
-        with self.for_range(dimensions[0]) as (loop, item):
+        N = self.var_copy(dimensions[0])
+        N.invariant = True
+        with self.for_range(N) as (loop, item):
             callargs = []
             for i, arg in enumerate(self.in_args):
                 casted = arg_ptrs[i].cast(C.pointer(arg.type))
@@ -63,7 +85,7 @@ class MultipleReturnUFunc(CDefinition):
         '''specialize to a workload
         '''
         func_def = CFuncRef(lfunc)
-        self._name_ = self.prefix + str(func_def)
+        self._name_ = UFUNC_PREFIX + str(func_def)
         self.FuncDef = func_def
         self.in_args = [a for a in lfunc.args
                         if not isinstance(a.type, PointerType)]

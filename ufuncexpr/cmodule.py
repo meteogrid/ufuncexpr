@@ -8,9 +8,7 @@ from ctypes.util import find_library
 import llvm.core as lc
 import llvm.ee as ee
 
-from .util import optimize_llvm_function
-from .builder import MultipleReturnUFunc
-from ._ufuncwrapper import UFuncWrapper
+from .builder import make_ufunc, UFUNC_PREFIX
 
 lc.load_library_permanently(find_library('stdc++'))
 
@@ -36,9 +34,7 @@ class CModule(object):
         for l in self.libraries:
             lc.load_library_permanently(find_library(l))
         self.module.verify()
-        eb = ee.EngineBuilder.new(self.module)
-        eb.opt(self.optimization_level)
-        #eb.mattrs("-sse1,-sse2,-sse3")
+        eb = ee.EngineBuilder.new(self.module).opt(optimization_level)
         self._ee = eb.create()
 
         initializer = self._extract_initializer()
@@ -80,20 +76,13 @@ class CModule(object):
 
     def get_ufunc(self, name, doc=''):
         llvm_function = self.module.get_function_named(name)
-        def_ =  MultipleReturnUFunc(llvm_function)
-        llvm_ufunction = def_(llvm_function.module)
-        functions = [llvm_ufunction]
-        map(optimize_llvm_function, functions)
-        ptrlist = map(long, map(self._ee.get_pointer_to_function, functions))
-        tyslist = [d.num for  d in def_.dtypes]
-        ufunc = UFuncWrapper(functions, ptrlist, tyslist, def_.nin, def_.nout,
-                             name=name, doc="CModule wrapped C function")
-        return ufunc
+        return make_ufunc([llvm_function], self._ee,
+                          doc='CModule wrapped universal function')
 
     @property
     def functions(self):
         return [f.name for f in self.module.functions
-                if not f.name.startswith(MultipleReturnUFunc.prefix)
+                if not f.name.startswith(UFUNC_PREFIX)
                 and f.linkage==lc.LINKAGE_EXTERNAL]
 
     def save_bitcode_to_disk(self):
