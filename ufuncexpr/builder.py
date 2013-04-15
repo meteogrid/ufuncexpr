@@ -182,15 +182,21 @@ def make_gufunc(llvm_function, name=None, doc="ufuncexpr wrapped function",
     import pycuda.driver as cuda
     import numpy as np
     
-    cpu = 'sm_%d%d' % pycuda.autoinit.device.compute_capability()
     def_ =  PTXElementwiseKernel(llvm_function)
     func = def_(llvm_function.module)
 
+    capability = pycuda.autoinit.device.compute_capability()
+    cpu = 'sm_%d%d' % capability
     ptxtm = le.TargetMachine.lookup(arch='nvptx64', cpu=cpu)
     pm = lp.build_pass_managers(ptxtm, opt=3, fpm=False).pm
     pm.run(func.module)
-
     asm = ptxtm.emit_assembly(func.module)
+
+    #XXX: Hack. llvm 3.2 doesn't set map_f64_to_f32 for cpu < sm_13 as it should
+    if capability < (1, 3):
+        target_str = '.target ' + cpu
+        asm = asm.replace(target_str, target_str + ', map_f64_to_f32')
+
     mod = module_from_buffer(asm, options=cuda_module_options)
     gfunc = mod.get_function(func.name)
     gfunc.prepare('P'*(def_.nin+def_.nout) + 'i')
@@ -206,6 +212,7 @@ def make_gufunc(llvm_function, name=None, doc="ufuncexpr wrapped function",
             a_gpu = cuda.mem_alloc(a.size * a.dtype.itemsize)
             cuda.memcpy_htod(a_gpu, a)
             call_args.append(a_gpu)
+        del args
 
         outputs = []
         for dtype in def_.dtypes[def_.nin:]:
