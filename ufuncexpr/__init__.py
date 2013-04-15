@@ -99,9 +99,9 @@ class UFuncExpression(object):
     Can call reduce, accumulate, etc..
 
     >>> f6 = UFuncExpression("(a+1)*b", _backend='ufunc')
-    >>> f6.reduce(range(6))
+    >>> f6.reduce(map(float, range(6)))
     325.0
-    >>> f6.accumulate(range(6))
+    >>> f6.accumulate(map(float, range(6)))
     array([   0.,    1.,    4.,   15.,   64.,  325.])
     """
 

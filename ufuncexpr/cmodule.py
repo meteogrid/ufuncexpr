@@ -24,9 +24,10 @@ class CModule(object):
 
 
     def __init__(self, name, sources, libraries=None, optimization_level=3,
-                 language='c'):
+                 cflags=None, language='c'):
         self.name = __name__ + '.' + name
         self.sources = sources
+        self.cflags = cflags
         self.libraries = libraries or ()
         self.optimization_level = optimization_level
         self.language = language
@@ -36,6 +37,7 @@ class CModule(object):
         self.module.verify()
         eb = ee.EngineBuilder.new(self.module).opt(optimization_level)
         self._ee = eb.create()
+        self._ufunc_cache = {}
 
         initializer = self._extract_initializer()
         if initializer:
@@ -75,9 +77,13 @@ class CModule(object):
         return func
 
     def get_ufunc(self, name, doc=''):
-        llvm_function = self.module.get_function_named(name)
-        return make_ufunc([llvm_function], self._ee,
-                          doc='CModule wrapped universal function')
+        ufunc = self._ufunc_cache.get(name)
+        if ufunc is None:
+            llvm_function = self.module.get_function_named(name)
+            ufunc = make_ufunc([llvm_function], self._ee,
+                               doc='CModule wrapped universal function')
+            self._ufunc_cache[name] = ufunc
+        return ufunc
 
     @property
     def functions(self):
@@ -112,9 +118,11 @@ class CModule(object):
         return module
              
     def _compile_to_bitcode(self, source, cwd=None):
+        
         p = subprocess.Popen(
-            ['clang', '-Wall', '-emit-llvm',
-             '-x', self.language,
+            ['clang', '-Wall', '-emit-llvm']
+            + list(self.cflags or []) +
+            ['-x', self.language,
              '-c', '-', '-o', '-'],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
