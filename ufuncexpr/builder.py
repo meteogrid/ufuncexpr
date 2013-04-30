@@ -180,6 +180,7 @@ def make_gufunc(llvm_function, name=None, doc="ufuncexpr wrapped function",
     import pycuda.autoinit
     from pycuda.driver import module_from_buffer
     import pycuda.driver as cuda
+    import pycuda.tools
     import numpy as np
     
     def_ =  PTXElementwiseKernel(llvm_function)
@@ -201,6 +202,9 @@ def make_gufunc(llvm_function, name=None, doc="ufuncexpr wrapped function",
     gfunc = mod.get_function(func.name)
     gfunc.prepare('P'*(def_.nin+def_.nout) + 'i')
 
+    hpool = pycuda.tools.PageLockedMemoryPool()
+    dpool = pycuda.tools.DeviceMemoryPool()
+
     def wrapper(*args, **kw):
         block = kw.setdefault('block', (256,1,1))
         grid = kw.setdefault('grid', (1,1))
@@ -209,15 +213,15 @@ def make_gufunc(llvm_function, name=None, doc="ufuncexpr wrapped function",
         assert all((a.dtype==d) for (a,d) in zip(args, def_.dtypes))
         call_args = []
         for a in args:
-            a_gpu = cuda.mem_alloc(a.size * a.dtype.itemsize)
+            a_gpu = dpool.allocate(a.size * a.dtype.itemsize)
             cuda.memcpy_htod(a_gpu, a)
             call_args.append(a_gpu)
         del args
 
         outputs = []
         for dtype in def_.dtypes[def_.nin:]:
-            o = cuda.aligned_empty(shape, dtype=dtype)
-            o_gpu = cuda.mem_alloc(a.size * a.dtype.itemsize)
+            o = hpool.allocate(shape, dtype=dtype)
+            o_gpu = dpool.allocate(a.size * a.dtype.itemsize)
             outputs.append((o,o_gpu))
             call_args.append(o_gpu)
         N = reduce(lambda a,b:a*b, shape)
