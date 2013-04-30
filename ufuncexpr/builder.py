@@ -175,6 +175,9 @@ class PTXIntrinsics(object):
             intr = builder.get_intrinsic(intrinsic_id, [])
             setattr(self, name, intr)
 
+
+hpool = dpool = None
+
 def make_gufunc(llvm_function, name=None, doc="ufuncexpr wrapped function",
                 cuda_module_options=[]):
     import pycuda.autoinit
@@ -202,8 +205,11 @@ def make_gufunc(llvm_function, name=None, doc="ufuncexpr wrapped function",
     gfunc = mod.get_function(func.name)
     gfunc.prepare('P'*(def_.nin+def_.nout) + 'i')
 
-    hpool = pycuda.tools.PageLockedMemoryPool()
-    dpool = pycuda.tools.DeviceMemoryPool()
+    global hpool, dpool
+    if None in [hpool, dpool]:
+        hpool = pycuda.tools.PageLockedMemoryPool()
+        dpool = pycuda.tools.DeviceMemoryPool()
+
 
     def wrapper(*args, **kw):
         block = kw.setdefault('block', (256,1,1))
