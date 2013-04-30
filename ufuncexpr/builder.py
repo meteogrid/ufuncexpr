@@ -2,12 +2,14 @@ from llvm.core import *
 from llvm_cbuilder import *
 import llvm_cbuilder.shortnames as C
 
+import numpy as np
 from .util import llvm_ty_to_dtype, optimize_llvm_function
 from ._ufuncwrapper import UFuncWrapper
 
 UFUNC_PREFIX = '__PyUFuncGenericFunction_'
 
-def make_ufunc(llvm_functions, engine, name=None, doc="ufuncexpr wrapped function"):
+def make_ufunc(name, llvm_functions, engine, doc="ufuncexpr wrapped function",
+               **__):
     functions = []
     tyslist = []
     nin, nout = None, None
@@ -176,70 +178,91 @@ class PTXIntrinsics(object):
             setattr(self, name, intr)
 
 
-hpool = dpool = None
 
-def make_gufunc(llvm_function, name=None, doc="ufuncexpr wrapped function",
-                cuda_module_options=[]):
+def make_gufunc(name, llvm_functions, doc="ufuncexpr wrapped function",
+                cuda_module_options=[], **kw):
+
     import pycuda.autoinit
-    from pycuda.driver import module_from_buffer
     import pycuda.driver as cuda
-    import pycuda.tools
-    import numpy as np
-    
+
+    llvm_function = llvm_functions[0] #TODO support more
     def_ =  PTXElementwiseKernel(llvm_function)
-    func = def_(llvm_function.module)
-
+    llvm_kernel = def_(llvm_function.module)
     capability = pycuda.autoinit.device.compute_capability()
-    cpu = 'sm_%d%d' % capability
-    ptxtm = le.TargetMachine.lookup(arch='nvptx64', cpu=cpu)
-    pm = lp.build_pass_managers(ptxtm, opt=3, fpm=False).pm
-    pm.run(func.module)
-    asm = ptxtm.emit_assembly(func.module)
-
-    #XXX: Hack. llvm 3.2 doesn't set map_f64_to_f32 for cpu < sm_13 as it should
-    if capability < (1, 3):
-        target_str = '.target ' + cpu
-        asm = asm.replace(target_str, target_str + ', map_f64_to_f32')
-
-    mod = module_from_buffer(asm, options=cuda_module_options)
-    gfunc = mod.get_function(func.name)
-    gfunc.prepare('P'*(def_.nin+def_.nout) + 'i')
-
-    global hpool, dpool
-    if None in [hpool, dpool]:
-        hpool = pycuda.tools.PageLockedMemoryPool()
-        dpool = pycuda.tools.DeviceMemoryPool()
+    gfunc = _prepared_gfunc_from_llvm_kernel(llvm_kernel,capability,
+                                             cuda_module_options)
 
 
-    def wrapper(*args, **kw):
-        block = kw.setdefault('block', (256,1,1))
-        grid = kw.setdefault('grid', (1,1))
+    def gufunc(*args, **kw):
+        args = [a if hasattr(a, 'shape') else np.array(a)
+                for a in args]
+        args = [a if a.dtype==d else a.astype(d)
+                for a,d in zip(args,def_.dtypes)]
         shape = args[0].shape
-        assert len(args) == def_.nin
-        assert all((a.dtype==d) for (a,d) in zip(args, def_.dtypes))
+        size = args[0].size
+        hpool, dpool = _get_pools()
+
         call_args = []
         for a in args:
             a_gpu = dpool.allocate(a.size * a.dtype.itemsize)
             cuda.memcpy_htod(a_gpu, a)
             call_args.append(a_gpu)
-        del args
 
         outputs = []
         for dtype in def_.dtypes[def_.nin:]:
             o = hpool.allocate(shape, dtype=dtype)
             o_gpu = dpool.allocate(a.size * a.dtype.itemsize)
-            outputs.append((o,o_gpu))
+            outputs.append((o, o_gpu))
             call_args.append(o_gpu)
-        N = reduce(lambda a,b:a*b, shape)
-        call_args.append(N)
+
+        call_args.append(size)
+
+        block = kw.get('block', (256, 1, 1))
+        grid = kw.get('grid',
+                      (int((size + block[0] - 1) / block[0]), 1))
         gfunc.prepared_call(grid, block, *call_args)
+
         for o, o_gpu in outputs:
             cuda.memcpy_dtoh(o, o_gpu)
-        out = tuple(o[0] for o in outputs)
+        out = (o[0] for o in outputs)
+        out = tuple(o.dtype.type(o) if o.shape==() else o
+                    for o in out)
         if len(out)==1:
             out = out[0]
         return out
-    wrapper.func_name = name or llvm_function.name
-    wrapper.__doc__ = doc
-    wrapper.llvm_kernel = func
-    return wrapper
+
+    gufunc.func_name = name
+    gufunc.__doc__ = doc
+    gufunc.llvm_kernels = [llvm_kernel]
+    gufunc.llvm_functions = llvm_functions
+    return gufunc
+
+def _prepared_gfunc_from_llvm_kernel(llvm_kernel, capability=(1,1),
+                                     cuda_module_options=[]):
+    from pycuda.driver import module_from_buffer
+    cpu = 'sm_%d%d' % capability
+    ptxtm = le.TargetMachine.lookup(arch='nvptx64', cpu=cpu)
+    pm = lp.build_pass_managers(ptxtm, opt=3, fpm=False).pm
+    pm.run(llvm_kernel.module)
+    asm = ptxtm.emit_assembly(llvm_kernel.module)
+
+    #XXX: Hack. llvm 3.2 doesn't set map_f64_to_f32 for cpu < sm_13 as it
+    # should
+    if capability < (1, 3):
+        target_str = '.target ' + cpu
+        asm = asm.replace(target_str, target_str + ', map_f64_to_f32')
+
+    mod = module_from_buffer(asm, options=cuda_module_options)
+    gfunc = mod.get_function(llvm_kernel.name)
+    gfunc.prepare('P'*(len(llvm_kernel.args)-1) + 'i')
+    return gfunc
+
+def _get_pools():
+    if _get_pools.hpool is None:
+        import pycuda.tools
+        _get_pools.hpool = pycuda.tools.PageLockedMemoryPool()
+        _get_pools.dpool = pycuda.tools.DeviceMemoryPool()
+    return _get_pools.hpool, _get_pools.dpool
+_get_pools.hpool = None
+_get_pools.dpool = None
+

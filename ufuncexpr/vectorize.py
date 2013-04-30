@@ -1,12 +1,20 @@
 from numba import jit
 from numba.codegen.llvmcontext import LLVMContextManager
-from .builder import make_ufunc
+from .builder import make_ufunc, make_gufunc
+
+__vectorizers__ = dict(
+    cpu = make_ufunc,
+    gpu = make_gufunc,
+    )
 
 def vectorize(signatures, **kw):
-    kw['nopython'] = True # Using python inside UFuncs seems to segfault, perhaps GIL related? investigate...
+    backend = kw.pop('backend', 'cpu')
+    builder = __vectorizers__[backend]
+    kw['nopython'] = True
+    engine = LLVMContextManager().execution_engine
     def wrap(f):
         llvm_functions = [jit(s, **kw)(f).lfunc for s in signatures]
-        engine = LLVMContextManager().execution_engine
-        return make_ufunc(llvm_functions, engine, f.__name__, f.__doc__ or '')
+        return builder(f.__name__, llvm_functions, engine=engine,
+                       doc=f.__doc__ or '')
     return wrap
 

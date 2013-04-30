@@ -80,7 +80,7 @@ class CModule(object):
         ufunc = self._ufunc_cache.get(name)
         if ufunc is None:
             llvm_function = self.module.get_function_named(name)
-            ufunc = make_ufunc([llvm_function], self._ee,
+            ufunc = make_ufunc(name, [llvm_function], engine=self._ee,
                                doc='CModule wrapped universal function')
             self._ufunc_cache[name] = ufunc
         return ufunc
